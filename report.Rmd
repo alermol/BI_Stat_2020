@@ -13,6 +13,26 @@ editor_options:
   chunk_output_type: inline
 ---
 
+<!-- Список необходимых пакетов и параметров для компиляции отчета (получены из sessionInfo()): 
+
+R version 3.6.3 (2020-02-29)
+Platform: x86_64-pc-linux-gnu (64-bit)
+Running under: Ubuntu 18.04.5 LTS
+
+locale:
+ [1] LC_CTYPE=ru_RU.UTF-8       LC_NUMERIC=C               LC_TIME=ru_RU.UTF-8        LC_COLLATE=ru_RU.UTF-8    
+ [5] LC_MONETARY=ru_RU.UTF-8    LC_MESSAGES=ru_RU.UTF-8    LC_PAPER=ru_RU.UTF-8       LC_NAME=C                 
+ [9] LC_ADDRESS=C               LC_TELEPHONE=C             LC_MEASUREMENT=ru_RU.UTF-8 LC_IDENTIFICATION=C
+ 
+attached base packages:
+ [1] stats     graphics  grDevices utils     datasets  methods   base     
+
+other attached packages:
+ [1] gridExtra_2.3   psych_2.0.9     forcats_0.5.0   stringr_1.4.0   dplyr_1.0.2     purrr_0.3.4     readr_1.3.1    
+ [8] tidyr_1.1.2     tibble_3.0.3    ggplot2_3.3.2   tidyverse_1.3.0
+-->
+
+
 ```{r Install and attach requring packages, echo=FALSE, message=FALSE, warning=FALSE}
 list_of_packages <- c("tidyverse", "psych", "gridExtra")
 new_packages <- 
@@ -412,9 +432,19 @@ ggplot(diam_table, aes(Diameter, col = factor(Rings), fill = factor(Rings))) +
 
 Для сравнения двух выборок с разным количеством колец используем t-тест Стьюдента
 
+Сначала посмотрим наличие выбросов в группе с 5 и 15 кольцами
+
+```{r echo=FALSE, message=FALSE}
+diam_table %>% 
+  group_by(Rings) %>% 
+  summarise(Outliers_number = length(boxplot.stats(Diameter)$Diameter)) %>% 
+  ungroup()
+```
+Выбросов нет, значит нет необходимости считать варианты с учетом выбросов и без них.
+
 ```{r message=FALSE, warning=FALSE, include=FALSE}
-five_rings_diam = diam_table$Diameter[diam_table$Rings == 5]
-fifteen_rings_diam = diam_table$Diameter[diam_table$Rings == 15]
+five_rings_diam <- diam_table$Diameter[diam_table$Rings == 5]
+fifteen_rings_diam <- diam_table$Diameter[diam_table$Rings == 15]
 ttest <- t.test(x = five_rings_diam, y = fifteen_rings_diam)
 ```
 
@@ -475,7 +505,6 @@ ggplot(cleaned_moule_data, aes(x = Rings, y = Length)) +
 male_rings_number = cleaned_moule_data$Rings[cleaned_moule_data$Sex == "male"]
 female_rings_number = cleaned_moule_data$Rings[cleaned_moule_data$Sex == "female"]
 ttest <- t.test(x = male_rings_number, y = female_rings_number)
-ttest
 ```
 
 Результаты двухвыборочного t-теста Стьюдента с поправкой Уэлча показали наличие значимой разницы (df = `r as.numeric(round(ttest$parameter))`, p-value = `r as.numeric(round(ttest$p.value, 3))`) по количеству колец моллюсков мужского (mean = `r round(as.numeric(ttest$estimate), 2)[1]`) и женского (mean = `r round(as.numeric(ttest$estimate), 2)[2]`) пола со стандартной ошибкой среднего равной `r round(as.numeric(ttest$stderr), 3)`
@@ -488,7 +517,6 @@ ggplot(filter(cleaned_moule_data, (Sex == "male" | Sex == "female")),
   theme_minimal(base_size = 20)
 ```
 
-### Предсказания пола
 
 
 
