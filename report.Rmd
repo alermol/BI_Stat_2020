@@ -78,7 +78,7 @@ non_numeric <-
 lapply(non_numeric, function(x) x[!str_detect(x, "[:digit:]") & !is.na(x)])
 ```
 
-В данных этих колонках действительно присутствуют нечисловые значения. В колонке `Length` такое значение нужно заменить на `NA`, а в двух других - на число или индекс, которому они соответствуют.
+В колонке `Length` такое значение нужно заменить на `NA`, а в двух других - на число или индекс, которому они соответствуют.
 
 ```{r message=FALSE, warning=FALSE, include=FALSE}
 moule_data$Rings[which(moule_data$Rings %in% "nine")] <- 9
@@ -215,7 +215,7 @@ p8 <- ggplot(cleaned_moule_data, aes(x = Sex, y = Shell_weight)) +
 grid.arrange(p1, p2, p3, p4, p5, p6, p7, p8, nrow = 2)
 ```
 
-Выбросы есть и их много для каждой переменной.
+Выбросы есть и их много для каждой переменной и для каждого пола. 
 
 Попробуем узнать источник выбросов. Возможно эти выбросы идут от каких-то конкретных студентов, собиравших значения.
 
@@ -227,9 +227,15 @@ cleaned_moule_data %>%
                       length(.) * 100, 2))
 ```
 
-В таблице представлено процентное соотношение количества выбросов от измерений каждого студента к общему количеству наблюдений, полученных от студента. Как видно, количество выбросов распеделено относительно равномерно по каждой переменной для всех студентов. Это дает основание предполагать, что выбросы - либо результат дизайна эксперимента, либо результат погрешности при измерениях. Для большинства переменных, если посмотреть на графики выше, выбросы являются односторонними и чаще всего не образуют отдельных "популяций", резко отличающихся от основной. Это говорит о том, что полученные выбросы могут быть свойством популяции, например, популяция находится под действием стабилизирующего отбора в изменяющихся условиях окружащей среды, а не ошибкой измерений. Едиственные выбросы, которые выглядят как аномалии - это выбросы у мужского и женского пола переменной `height` и их можно удалить. И снова пострим график чтобы убедиться, что выбросы действительно были удалены.
+В таблице представлено процентное соотношение количества выбросов от измерений каждого студента к общему количеству наблюдений, полученных от студента. Как видно, количество выбросов распеделено относительно равномерно по каждой переменной для всех студентов. Это дает основание предполагать, что выбросы - либо результат дизайна эксперимента, либо результат погрешности при измерениях.
 
-```{r echo=FALSE, fig.height=7, fig.width=12, message=FALSE, warning=FALSE}
+Для большинства переменных, если посмотреть на графики выше, выбросы являются односторонними и чаще всего не образуют отдельных "популяций", резко отличающихся от основной. Это говорит о том, что полученные выбросы могут быть свойством популяции, например, популяция находится под действием стабилизирующего отбора в изменяющихся условиях окружащей среды, а не ошибкой измерений.
+
+Для проверки гипотезы о наличии стабилизурющего отбора требуются дополнительные данные, поэтому при работе с переменными, выбросы из них будут удаляться полностью.
+
+Единственные выбросы, которые выглядят как ошибки - это выбросы переменной `Height` у мужского и женского пола. Их можно удалить.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
 max_male_height <- 
   max(cleaned_moule_data$Height[cleaned_moule_data$Sex == "male"])
 max_female_height <- 
@@ -241,33 +247,7 @@ cleaned_moule_data <-
                            "yes", "no")) %>% 
   filter(Outlier == "no") %>% 
   select(-c(Outlier, Student))
-ggplot(cleaned_moule_data, aes(x = Sex, y = Height)) +
-  geom_boxplot(width = 0.2) + 
-  theme_minimal(base_size = 20)  +
-  scale_x_discrete(labels = c("Male", "Female", "Uvenile")) +
-  theme(panel.grid.major.x = element_blank(),
-        panel.grid.minor.x = element_blank())
 ```
-
-Для проверки гипотезы о наличии стабилизурющего отбора требуются дополнительные данные, поэтому сейчас строки, содержащие выбросы, необходимо удалить.
-
-```{r}
-cleaned_moule_data <- 
-  cleaned_moule_data %>% 
-  group_by(Sex) %>% 
-  mutate(remove = if_else(Rings %in% boxplot.stats(Rings)$out, "yes", "no")) %>% 
-  mutate(remove = if_else(Length %in% boxplot.stats(Length)$out, "yes", remove)) %>% 
-  mutate(remove = if_else(Diameter %in% boxplot.stats(Diameter)$out, "yes", remove)) %>% 
-  mutate(remove = if_else(Height %in% boxplot.stats(Height)$out, "yes", remove)) %>%
-  mutate(remove = if_else(Whole_weight %in% boxplot.stats(Whole_weight)$out, "yes", remove)) %>%
-  mutate(remove = if_else(Shucked_weight %in% boxplot.stats(Shucked_weight)$out, "yes", remove)) %>%
-  mutate(remove = if_else(Viscera_weight %in% boxplot.stats(Viscera_weight)$out, "yes", remove)) %>%
-  mutate(remove = if_else(Shell_weight %in% boxplot.stats(Shell_weight)$out, "yes", remove)) %>% 
-  filter(remove == "no") %>% 
-  select(-c(remove)) %>% 
-  ungroup()
-```
-
 
 ## Проверка корректности значений
 
@@ -277,7 +257,8 @@ cleaned_moule_data <-
 sum_table <- 
   cleaned_moule_data %>% 
   group_by(Sex) %>% 
-  summarise(across(where(is.numeric), min))
+  summarise(across(where(is.numeric), min)) %>% 
+  ungroup()
 sum_table
 ```
 Видно, что переменная `Heigth` для пола `Uvenil` имеет минимальное значение 0, что некорректно. Чтобы исправить это, можно удалить все строки, в которых эта переменная для этого пола равняется нулю.
@@ -287,7 +268,8 @@ cleaned_moule_data <- filter(cleaned_moule_data, Height > 0)
 sum_table <- 
   cleaned_moule_data %>% 
   group_by(Sex) %>% 
-  summarise(across(where(is.numeric), min))
+  summarise(across(where(is.numeric), min)) %>% 
+  ungroup()
 sum_table
 ```
 
@@ -314,27 +296,86 @@ pairs.panels(
 
 ## Анализ данных
 
+Поскольку выбросы вероятнее всего являются свойством популяции, можно смотреть как будет влиять на результаты статистических тестов, если включать и не включать их в расчеты.
+
 ### Среднее и стандартное отклонение переменной `Length`
 
+#### С выбросами
+
 ```{r echo=FALSE, message=FALSE, warning=FALSE}
-cleaned_moule_data %>% 
+length_sex_outlier_data <- select(cleaned_moule_data, c(Sex, Length))
+length_sex_outlier_data %>% 
   group_by(Sex) %>% 
   summarise(Mean = round(mean(Length), 2), Std_dev = round(sd(Length), 2))
 ```
 
-### Количество моллюсков, у которых переменная `Height` не превышает `0.165`
+#### Без выбросов
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+cleaned_moule_data %>% 
+  select(c(Sex, Length)) %>% 
+  group_by(Sex) %>% 
+  mutate(remove = if_else(Length %in% boxplot.stats(Length)$out, "yes", "no")) %>% 
+  filter(remove == "no") %>%
+  select(-c(remove)) %>% 
+  summarise(Mean = round(mean(Length), 2), Std_dev = round(sd(Length), 2)) %>% 
+  ungroup()
+```
+Как видно из этих результатов, присутствие выбросов не сильно изменило результат - максимальная разница 0.1, что является еще одним свидетельством в пользу того, что выбросы являются свойством популяции.
+
+### Процент моллюсков, у которых значение переменно переменная `Height` не превышает `0.165`
+
+#### С выбросами
 
 ```{r message=FALSE, warning=FALSE, include=FALSE}
-height_filter <- cleaned_moule_data %>% 
-  filter(Height <= 0.165) %>% 
+height_filter_outliers <- 
+  cleaned_moule_data %>% 
+  select(Height) %>% 
+  filter(Height <= 0.165) %>%
   nrow()
 ```
 
-Количество моллюсков, у которых высота раковины (`Height`) не превышает  `0.165`, составляет `r round(height_filter / nrow(cleaned_moule_data) * 100, 2)`%.
+Процент моллюсков, у которых которых высота раковины (`Height`) не превышает `0.165`, при учете выбросов составляет `r round(height_filter_outliers / nrow(cleaned_moule_data) * 100, 2)`% 
+
+#### Без выбросов
+
+```{r echo=FALSE}
+height_filter_no_outliers <- 
+  cleaned_moule_data %>% 
+  select(Height) %>% 
+  mutate(remove = if_else(Height %in% boxplot.stats(Height)$out, "yes", "no")) %>% 
+  filter(Height <= 0.165, remove == "no") %>% 
+  select(-c(remove)) %>% 
+  nrow()
+```
+
+Процент моллюсков, у которых высота раковины (`Height`) не превышает  `0.165`, без учета выбросов составляет `r round(height_filter_no_outliers / nrow(cleaned_moule_data) * 100, 2)`%.
+
+И снова наличие выбросов не сильно повлияло на процент моллюсков, у которых высота раковины не превышает `0.165`.
 
 ### Значение переменной `Length`, которое больше, чем у 92% всех наблюдений
 
-По-сути, это квантиль 92%, который равен `r as.numeric(quantile(cleaned_moule_data$Length, probs = c(0, .92, 1)))[2]`
+Искомая величина - это квантиль 92%
+
+#### С выбросами
+
+Значение квантиля 92% для переменной `Length` = `r as.numeric(quantile(cleaned_moule_data$Length, probs = c(0, .92, 1)))[2]` 
+
+#### Без выбросов
+
+```{r echo=FALSE}
+height_filter_no_outliers <- 
+  cleaned_moule_data %>% 
+  select(Length) %>% 
+  mutate(remove = if_else(Length %in% boxplot.stats(Length)$out, "yes", "no")) %>% 
+  filter(remove == "no") %>% 
+  select(-c(remove)) %>% 
+  pull(Length)
+```
+
+Значение квантиля 92% для переменной `Length` = `r as.numeric(quantile(height_filter_no_outliers, probs = c(0, .92, 1)))[2]`
+
+Здесь наличие выбросов тоже никак не влияет на значение квантиля 92%.
 
 ### Z-score стандартизация переменной `Length`
 
