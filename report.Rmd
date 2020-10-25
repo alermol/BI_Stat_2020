@@ -192,7 +192,7 @@ datatable(cleaned_moule_data, width = '100%',
 
 Структура готовой таблицы
 
-```{r Look at the structure of ready table, echo=FALSE}
+```{r Look at the structure of ready table, echo=FALSE, comment=""}
 str(cleaned_moule_data, give.attr = F)
 ```
 
@@ -218,7 +218,7 @@ p2 <- ggplot(cleaned_moule_data, aes(x = Sex, y = Length)) +
   geom_boxplot(width = width, outlier.size = outlier_size) + 
   theme_minimal(base_size = base_size) + 
   scale_x_discrete(labels = c("Мужской", "Женский", "Ювенильный")) + 
-  labs(x = "Пол", y = "Длина") +
+  labs(x = "Пол", y = "Длина раковины") +
   theme(panel.grid.major.x = element_blank(),
         panel.grid.minor.x = element_blank(),
         axis.text.x = element_text(angle = 20, hjust = 1,
@@ -228,7 +228,7 @@ p3 <- ggplot(cleaned_moule_data, aes(x = Sex, y = Diameter)) +
   geom_boxplot(width = width, outlier.size = outlier_size) + 
   theme_minimal(base_size = base_size) + 
   scale_x_discrete(labels = c("Мужской", "Женский", "Ювенильный")) + 
-  labs(x = "Пол", y = "Диаметр") +
+  labs(x = "Пол", y = "Диаметр раковины") +
   theme(panel.grid.major.x = element_blank(),
         panel.grid.minor.x = element_blank(),
         axis.text.x = element_text(angle = 20, hjust = 1,
@@ -238,7 +238,7 @@ p4 <- ggplot(cleaned_moule_data, aes(x = Sex, y = Height)) +
   geom_boxplot(width = width, outlier.size = outlier_size) + 
   theme_minimal(base_size = base_size) + 
   scale_x_discrete(labels = c("Мужской", "Женский", "Ювенильный")) + 
-  labs(x = "Пол", y = "Высота") +
+  labs(x = "Пол", y = "Высота раковины") +
   theme(panel.grid.major.x = element_blank(),
         panel.grid.minor.x = element_blank(),
         axis.text.x = element_text(angle = 20, hjust = 1,
@@ -333,7 +333,7 @@ ggplot(cleaned_moule_data, aes(x = Sex, y = Height)) +
   geom_boxplot(width = width, outlier.size = outlier_size) + 
   theme_minimal(base_size = base_size) + 
   scale_x_discrete(labels = c("Мужской", "Женский", "Ювенильный")) + 
-  labs(x = "Пол", y = "Высота") +
+  labs(x = "Пол", y = "Высота раковины") +
   theme(panel.grid.major.x = element_blank(),
         panel.grid.minor.x = element_blank(),
         axis.text.x = element_text(angle = 20, hjust = 1,
@@ -377,7 +377,8 @@ datatable(sum_table, width = '100%',
 ```{r Build correlation plot, echo=FALSE, fig.height=8, fig.width=13, message=FALSE, warning=FALSE}
 cor_plot_data <- 
   cleaned_moule_data[,colnames(select(cleaned_moule_data, where(is.numeric)))]
-colnames(cor_plot_data) <- c("Количество колец", "Длина", "Диаметр", "Высота",
+colnames(cor_plot_data) <- c("Количество колец", "Длина раковины", 
+                             "Диаметр раковины", "Высота раковины",
                              "Полный вес", "Вес без раковины",
                              "Вес внутренностей", "Вес раковины")
 pairs.panels(
