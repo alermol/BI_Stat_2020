@@ -1,0 +1,711 @@
+---
+title: "Отчет по проекту 'Насколько стара мидия'"
+output:
+  html_document: 
+    df_print: paged
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    number_section: true
+    code_folding: hide
+    theme: spacelab
+editor_options: 
+  chunk_output_type: inline
+---
+
+<!-- 
+
+Список необходимых пакетов и параметров для компиляции отчета (получены из sessionInfo()): 
+
+R version 3.6.3 (2020-02-29)
+Platform: x86_64-pc-linux-gnu (64-bit)
+Running under: Ubuntu 18.04.5 LTS
+
+locale:
+ [1] LC_CTYPE=ru_RU.UTF-8       LC_NUMERIC=C               LC_TIME=ru_RU.UTF-8        LC_COLLATE=ru_RU.UTF-8    
+ [5] LC_MONETARY=ru_RU.UTF-8    LC_MESSAGES=ru_RU.UTF-8    LC_PAPER=ru_RU.UTF-8       LC_NAME=C                 
+ [9] LC_ADDRESS=C               LC_TELEPHONE=C             LC_MEASUREMENT=ru_RU.UTF-8 LC_IDENTIFICATION=C
+ 
+attached base packages:
+ [1] stats     graphics  grDevices utils     datasets  methods   base     
+
+other attached packages:
+ [1] conflicted_1.0.4 Rmisc_1.5        plyr_1.8.6       lattice_0.20-41  DT_0.16          gridExtra_2.3    psych_2.0.9  
+ [8] ggplot2_3.3.2    stringr_1.4.0    readr_1.3.1      tibble_3.0.3     dplyr_1.0.2  
+-->
+
+
+```{r Install and attach requring packages, echo=FALSE, message=FALSE, warning=FALSE}
+list_of_packages <- c("dplyr", "tibble", "readr", "stringr", 
+                      "psych", "gridExtra", "DT", "grid", "Rmisc", 
+                      "conflicted", "ggplot2")
+new_packages <- 
+    list_of_packages[!(list_of_packages %in% installed.packages()[,"Package"])]
+if(length(new_packages)) install.packages(new_packages)
+library("dplyr")
+library("tibble")
+library("readr")
+library("stringr")
+library("ggplot2")
+library("psych")
+library("gridExtra")
+library("DT")
+library("grid")
+library("Rmisc")
+library("conflicted")
+
+conflict_prefer("summarise", "dplyr")
+conflict_prefer("rename", "dplyr")
+conflict_prefer("mutate", "dplyr")
+conflict_prefer("filter", "dplyr")
+```
+
+```{r Define functions, message=FALSE, warning=FALSE, include=FALSE}
+combine_tables <- function(path, ...) {
+  if (dir.exists(path) == F) stop("Directorty is not exist")
+  result_dataframe <- tibble()
+  files_to_combine <- list.files(path, pattern = "*.csv$")
+  if (length(files_to_combine) == 0) stop("No csv files in folder")
+  for (file in files_to_combine) {
+    data_to_combine <- read_csv(paste(path, file, sep = ""))
+    data_to_combine <- add_column(data_to_combine, .before = T, 
+                                  Student = strsplit(file, ".", 
+                                                     fixed = T)[[1]][1])
+    result_dataframe <- rbind(result_dataframe, data_to_combine) 
+  }
+  result_dataframe
+}
+```
+
+
+# Визуальная оценка данных
+
+## Сборка данных в одну таблицу
+
+```{r Combine tables, message=FALSE, warning=TRUE, include=FALSE, error=TRUE}
+moule_data <- combine_tables("/home/rorschach/bioinf/Rstat/project1/BI_Stat_2020/Data/")
+```
+
+```{r Table structure, echo=FALSE, comment=""}
+str(moule_data, give.attr = F)
+```
+
+В структуре собранной таблицы видны перменные, которые являются строковыми и должны быть строковыми, например, `Student`, а есть перменные, которые должны быть числовыми, но являются строковыми, потому что где-то в них есть строка и сработало автоматичнское приведение типов.
+
+## Переименование столбцов
+
+Столбец с полом имеет слишком длинное название. Переименуем его для удобства работы.
+
+```{r Rename Sex column, echo=FALSE, message=FALSE, warning=FALSE}
+moule_data <- 
+  moule_data %>% 
+  rename(Sex = `Sex (1 – male, 2 – female, 3 – uvenil)`)
+datatable(moule_data, width = '100%',
+          options = list(scrollX = TRUE),
+          filter = "top",
+          rownames = FALSE)
+```
+
+Другие столбцы не нуждаются в переименовании.
+
+## Очистка данных от неспецифических значений
+
+В первых трех столбцах таблицы (не считая столбца `Student`) числовые данные привелись к строковому типу, что говорит о том, что где-то в этих столбцах есть нечисловые данные.
+
+```{r Find non-numeric data, echo=FALSE, comment="", tidy=TRUE}
+non_numeric <- 
+  apply(moule_data[,colnames(select(moule_data, where(is.character) & 
+                                      !contains("Student")))], 2, unique)
+lapply(non_numeric, function(x) x[!str_detect(x, "[:digit:]") & !is.na(x)])
+```
+
+В колонке `Length` такое значение нужно заменить на `NA`, а в двух других - на число или индекс, которому они соответствуют.
+
+```{r Replace non-numeric data, message=FALSE, warning=FALSE, include=FALSE}
+moule_data$Rings[which(moule_data$Rings %in% "nine")] <- 9
+moule_data$Sex[which(moule_data$Sex %in% "three")] <- 3
+moule_data$Sex[which(moule_data$Sex %in% "one")] <- 1
+moule_data$Sex[which(moule_data$Sex %in% "male")] <- 1
+moule_data$Length[which(moule_data$Length %in% 
+                          "No data! I forgot to mesure it!(")] <- NA
+```
+
+## Очистка от `NA`
+
+Прежде чем очищать от `NA`, сначала посмотрим на количество пропущенных значений в каждом столбце чтобы принять решение о том что с ними делать. 
+
+```{r Get number of NA values, echo=FALSE}
+na_data <- moule_data %>% 
+    select(everything()) %>% 
+    summarise(across(.cols = everything(), ~ sum(is.na(.))))
+datatable(na_data, width = '100%',
+          options = list(scrollX = TRUE),
+          rownames = FALSE)
+```
+
+Пропущенные значения есть, но их мало. Есть несколько вариантов действий чтобы их убрать:
+
+1. `na.omit()` просто целиком уберет строки, содержащие хотя бы одно пропущенное значение.
+
+2. Заменить значения на среднее или медиану.
+
+Поскольку пропущенных значений немного относительно всех данных в таблице, то можно пожертвовать ими просто убрав строки, содержащие их, из дальнешего анализа с помощью `na.omit()`
+
+```{r Remove NA values, echo=FALSE}
+cleaned_moule_data <- na.omit(moule_data)
+na_data <- cleaned_moule_data %>% 
+  select(everything()) %>% 
+  summarise(across(.cols = everything(), ~ sum(is.na(.))))
+datatable(na_data, width = '100%',
+          options = list(scrollX = TRUE),
+          rownames = FALSE)
+```
+
+Теперь видно, что пропщуенных значений нет, а таблице осталось ```r nrow(cleaned_moule_data)``` строк. Было потеряно ```r nrow(moule_data) - nrow(cleaned_moule_data)``` наблюдение.
+
+## Конвертация типа переменных
+
+Конвертируем столбцы типа `chr` в столбцы типа `num`, потому что они стали столбцами такого типа из-за того, что там были неспецифические значения.
+
+```{r Convert columns type, include=FALSE}
+cleaned_moule_data <- 
+  cleaned_moule_data %>% 
+  mutate(across(where(is.character) & !contains("Student"), ~ as.numeric(.)))
+```
+
+С колонкой `Sex` будет удобнее работать, если она будет представлена в виде фактора с тремя градациями.
+
+```{r Convert sex into factor, include=FALSE}
+cleaned_moule_data$Sex <- factor(cleaned_moule_data$Sex,
+                                 levels = c(1, 2, 3),
+                                 labels = c("male", "female", "uvenil"))
+```
+
+Готовая таблица
+
+```{r Look at the ready table, echo=FALSE}
+datatable(cleaned_moule_data, width = '100%',
+          options = list(scrollX = TRUE),
+          filter = "top",
+          rownames = FALSE)
+```
+
+Структура готовой таблицы
+
+```{r Look at the structure of ready table, echo=FALSE, comment=""}
+str(cleaned_moule_data, give.attr = F)
+```
+
+# Разведочный анализ данных
+
+## Визуализация для обнаружения выбросов
+
+```{r Build boxplot for outliers detection, echo=FALSE, fig.height=7, fig.width=12, message=FALSE, warning=FALSE}
+base_size = 14
+width = 0.2
+outlier_size = 1
+p1 <- ggplot(cleaned_moule_data, aes(x = Sex, y = Rings)) + 
+  geom_boxplot(width = width, outlier.size = outlier_size) + 
+  theme_minimal(base_size = base_size) + 
+  scale_x_discrete(labels = c("Мужской", "Женский", "Ювенильный")) + 
+  labs(x = "Пол", y = "Количество колец") +
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        axis.text.x = element_text(angle = 20, hjust = 1,
+                                   size = 10, face = "bold"))
+
+p2 <- ggplot(cleaned_moule_data, aes(x = Sex, y = Length)) + 
+  geom_boxplot(width = width, outlier.size = outlier_size) + 
+  theme_minimal(base_size = base_size) + 
+  scale_x_discrete(labels = c("Мужской", "Женский", "Ювенильный")) + 
+  labs(x = "Пол", y = "Длина раковины") +
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        axis.text.x = element_text(angle = 20, hjust = 1,
+                                   size = 10, face = "bold"))
+
+p3 <- ggplot(cleaned_moule_data, aes(x = Sex, y = Diameter)) + 
+  geom_boxplot(width = width, outlier.size = outlier_size) + 
+  theme_minimal(base_size = base_size) + 
+  scale_x_discrete(labels = c("Мужской", "Женский", "Ювенильный")) + 
+  labs(x = "Пол", y = "Диаметр раковины") +
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        axis.text.x = element_text(angle = 20, hjust = 1,
+                                   size = 10, face = "bold"))
+
+p4 <- ggplot(cleaned_moule_data, aes(x = Sex, y = Height)) + 
+  geom_boxplot(width = width, outlier.size = outlier_size) + 
+  theme_minimal(base_size = base_size) + 
+  scale_x_discrete(labels = c("Мужской", "Женский", "Ювенильный")) + 
+  labs(x = "Пол", y = "Высота раковины") +
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        axis.text.x = element_text(angle = 20, hjust = 1,
+                                   size = 10, face = "bold"))
+
+p5 <- ggplot(cleaned_moule_data, aes(x = Sex, y = Whole_weight)) + 
+  geom_boxplot(width = width, outlier.size = outlier_size) + 
+  theme_minimal(base_size = base_size) + 
+  scale_x_discrete(labels = c("Мужской", "Женский", "Ювенильный")) + 
+  labs(x = "Пол", y = "Полный вес") +
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        axis.text.x = element_text(angle = 20, hjust = 1,
+                                   size = 10, face = "bold"))
+
+p6 <- ggplot(cleaned_moule_data, aes(x = Sex, y = Shucked_weight)) + 
+  geom_boxplot(width = width, outlier.size = outlier_size) + 
+  theme_minimal(base_size = base_size) + 
+  scale_x_discrete(labels = c("Мужской", "Женский", "Ювенильный")) + 
+  labs(x = "Пол", y = "Вес без раковины") +
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        axis.text.x = element_text(angle = 20, hjust = 1,
+                                   size = 10, face = "bold"))
+
+p7 <- ggplot(cleaned_moule_data, aes(x = Sex, y = Viscera_weight)) + 
+  geom_boxplot(width = width, outlier.size = outlier_size) + 
+  theme_minimal(base_size = base_size) + 
+  scale_x_discrete(labels = c("Мужской", "Женский", "Ювенильный")) + 
+  labs(x = "Пол", y = "Вес внутренностей") +
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        axis.text.x = element_text(angle = 20, hjust = 1,
+                                   size = 10, face = "bold"))
+
+p8 <- ggplot(cleaned_moule_data, aes(x = Sex, y = Shell_weight)) + 
+  geom_boxplot(width = width, outlier.size = outlier_size) + 
+  theme_minimal(base_size = base_size) + 
+  scale_x_discrete(labels = c("Мужской", "Женский", "Ювенильный")) + 
+  labs(x = "Пол", y = "Вес раковины") +
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        axis.text.x = element_text(angle = 20, hjust = 1,
+                                   size = 10, face = "bold"))
+grid.arrange(p1, p2, p3, p4, p5, p6, p7, p8, nrow = 2,
+             top = textGrob("Выбросы в наблюдениях, сгрупированных по полу", 
+                            just = "right", x = unit(0.35, "npc")))
+```
+
+Выбросы есть и их много для каждой переменной и для каждого пола. 
+
+Попробуем узнать источник выбросов. Возможно эти выбросы идут от каких-то конкретных студентов, собиравших значения.
+
+```{r Check students outliers, echo=FALSE, message=FALSE, warning=FALSE}
+cleaned_moule_data %>% 
+  group_by(Student) %>% 
+  summarise_if(is.numeric, 
+               ~ round(length(which(boxplot.stats(.)$out %in% .)) / 
+                      length(.) * 100, 2)) %>% 
+  datatable(width = '100%',
+            options = list(scrollX = TRUE),
+            filter = "top",
+            rownames = FALSE)
+```
+
+В таблице представлено процентное соотношение количества выбросов от измерений каждого студента к общему количеству наблюдений, полученных от студента. Как видно, количество выбросов распеделено относительно равномерно по каждой переменной для всех студентов. Это дает основание предполагать, что выбросы - либо результат дизайна эксперимента, либо результат погрешности при измерениях.
+
+Для большинства переменных, если посмотреть на графики выше, выбросы являются односторонними и чаще всего не образуют отдельных "популяций", резко отличающихся от основной. Это говорит о том, что полученные выбросы могут быть свойством популяции, например, популяция находится под действием стабилизирующего отбора в изменяющихся условиях окружащей среды, а не ошибкой измерений.
+
+Для проверки гипотезы о наличии стабилизурющего отбора требуются дополнительные данные, поэтому при работе с переменными, выбросы из них будут удаляться полностью.
+
+Единственные выбросы, которые выглядят как ошибки - это выбросы переменной `Height` у мужского и женского пола. Их можно удалить.
+
+```{r Remove outliers from Height variable, echo=FALSE, message=FALSE, warning=FALSE}
+max_male_height <- 
+  max(cleaned_moule_data$Height[cleaned_moule_data$Sex == "male"])
+max_female_height <- 
+  max(cleaned_moule_data$Height[cleaned_moule_data$Sex == "female"])
+cleaned_moule_data <- 
+  cleaned_moule_data %>% 
+  mutate(Outlier = if_else((Sex == "male" & Height == max_male_height) | 
+                             (Sex == "female" & Height == max_female_height), 
+                           "yes", "no")) %>% 
+  filter(Outlier == "no") %>% 
+  select(-c(Outlier, Student))
+```
+
+И проверим корректность удаленных выбросов, заново построив boxplot.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+ggplot(cleaned_moule_data, aes(x = Sex, y = Height)) + 
+  geom_boxplot(width = width, outlier.size = outlier_size) + 
+  theme_minimal(base_size = base_size) + 
+  scale_x_discrete(labels = c("Мужской", "Женский", "Ювенильный")) + 
+  labs(x = "Пол", y = "Высота раковины") +
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        axis.text.x = element_text(angle = 20, hjust = 1,
+                                   size = 10, face = "bold"))
+```
+
+Как видно из графика, выбросы были удалены.
+
+## Проверка корректности значений
+
+Тажке заметно, что некоторые величины своими минимальными значениями либо очень близки к 0, либо равняются ему. Для подтверждения посмотрим на суммарную таблицу.
+
+```{r Check min of each variable, echo=FALSE, message=FALSE, warning=FALSE}
+sum_table <- 
+  cleaned_moule_data %>% 
+  group_by(Sex) %>% 
+  summarise(across(where(is.numeric), min)) %>% 
+  ungroup()
+datatable(sum_table, width = '100%',
+          options = list(scrollX = TRUE),
+          rownames = FALSE)
+```
+Видно, что переменная `Heigth` для пола `Uvenil` имеет минимальное значение 0, что некорректно. Чтобы исправить это, можно удалить все строки, в которых эта переменная для этого пола равняется нулю.
+
+```{r Remove wrong min values, echo=FALSE, message=FALSE, warning=FALSE}
+cleaned_moule_data <- filter(cleaned_moule_data, Height > 0)
+sum_table <- 
+  cleaned_moule_data %>% 
+  group_by(Sex) %>% 
+  summarise(across(where(is.numeric), min)) %>% 
+  ungroup()
+datatable(sum_table, width = '100%',
+          options = list(scrollX = TRUE),
+          rownames = FALSE)
+```
+
+Теперь данные корректны.
+
+## Оценка переменных на наличие взаимосвязей
+
+```{r Build correlation plot, echo=FALSE, fig.height=8, fig.width=13, message=FALSE, warning=FALSE}
+cor_plot_data <- 
+  cleaned_moule_data[,colnames(select(cleaned_moule_data, where(is.numeric)))]
+colnames(cor_plot_data) <- c("Количество колец", "Длина раковины", 
+                             "Диаметр раковины", "Высота раковины",
+                             "Полный вес", "Вес без раковины",
+                             "Вес внутренностей", "Вес раковины")
+pairs.panels(
+  cor_plot_data, 
+  hist.col = "#1b9e77", 
+  smoother = T, 
+  ellipses = F,
+  stars = T,
+  scale = T, 
+  method = "spearman",
+  main = "Корреляции между переменными в данных (уровни значимости: *** - 0.001, ** - 0.01, * - 0.05)",
+  cex.labels = 1.4)
+```
+
+Судя по этим графикам можно сделать несколько выводов:
+
+1. Количество колец гораздо слабее, хоть и с высокой значимостью, коррелирует со всем остальными переменными, в отличие от корреляций всех других переменных между собой.
+
+2. Распределения большинства всех переменных близки к нормальному, хоть и с заметным смещением и нессиметричностью. Это происходит из-за наличия выбросов, которые могут являться следствием наличия стабилизирующего отбора в популяции под действием изменяющихся условий окружающей среды, т.е. такая форма распределения вызвана смещением нормы реакции. Если посмотреть данные за несколько лет, то можно будет сказать действительно ли имеет место стабилизирующий отбор.
+
+## Анализ данных
+
+Поскольку выбросы вероятнее всего являются свойством популяции, можно смотреть как будет влиять на результаты статистических тестов, если включать и не включать их в расчеты.
+
+### Среднее и стандартное отклонение переменной `Length`
+
+#### С выбросами
+
+```{r Mean and sd of Length with outliers, echo=FALSE, message=FALSE, warning=FALSE}
+length_sex_outlier_data <- select(cleaned_moule_data, c(Sex, Length))
+length_sex_outlier_data %>% 
+  group_by(Sex) %>% 
+  summarise(Mean = round(mean(Length), 2), sd = round(sd(Length), 2)) %>% 
+  ungroup() %>% 
+  datatable(width = '100%',
+            options = list(scrollX = TRUE),
+            rownames = FALSE)
+```
+
+#### Без выбросов
+
+```{r Mean and sd of Length without outliers, echo=FALSE, message=FALSE, warning=FALSE}
+cleaned_moule_data %>% 
+  select(c(Sex, Length)) %>% 
+  group_by(Sex) %>% 
+  mutate(remove = if_else(Length %in% boxplot.stats(Length)$out, "yes", "no")) %>% 
+  filter(remove == "no") %>%
+  select(-c(remove)) %>% 
+  summarise(Mean = round(mean(Length), 2), sd = round(sd(Length), 2)) %>% 
+  ungroup() %>% 
+  datatable(width = '100%',
+            options = list(scrollX = TRUE),
+            rownames = FALSE)
+```
+
+#### Оценка статистической значимости результатов с учетом и без учета выбросов
+
+Чтобы утверждать, что разница в статистических показателях в данном случае не значима, сравним выборки с учетом и без учета выбросов с помощью двухвыборочного t-теста.
+
+```{r Compare sample with and without outliers, echo=FALSE, message=FALSE, warning=FALSE}
+# create dataset with marked outliers by group
+marked_outliers_data <- 
+  cleaned_moule_data %>% 
+  select(c(Sex, Length)) %>% 
+  group_by(Sex) %>% 
+  mutate(outlier = if_else(Length %in% boxplot.stats(Length)$out, "yes", "no")) %>% 
+  ungroup()
+```
+
+Среднее отличается только у мужского пола. Для этой градации группирующей переменной и проведем t-тест.
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+with_outliers <- marked_outliers_data$Length[marked_outliers_data$Sex == "male"]
+without_outliers <- marked_outliers_data$Length[marked_outliers_data$Sex == "male" &
+                                               marked_outliers_data$outlier == "no"]
+t_test <- t.test(x = with_outliers, y = without_outliers)
+```
+
+Результаты двухвыборочного t-теста Стьюдента с поправкой Уэлча показали наличие статистически значимых различий (df = ```r round(t_test$parameter)```, p-value = ```r round(t_test$p.value, 2)```) для выборок содержащих (mean = ```r round(t_test$estimate[1], 2)```) и не содержащих (mean = ```r round(t_test$estimate[2], 2)```) со стандартной ошибкой среднего равной ```r round(t_test$stderr, 3)```.
+
+```{r Height thereshold, include=FALSE}
+height_thr <- 0.165
+```
+
+
+### Процент моллюсков, у которых значение переменно переменная `Height` не превышает `r height_thr`
+
+#### С выбросами
+
+```{r Height values number with outliers, message=FALSE, warning=FALSE, include=FALSE}
+height_filter_outliers <- 
+  cleaned_moule_data %>% 
+  select(Height) %>% 
+  filter(Height <= height_thr) %>%
+  nrow()
+```
+
+Процент моллюсков, у которых которых высота раковины (`Height`) не превышает `r height_thr`, при учете выбросов составляет `r round(height_filter_outliers / nrow(cleaned_moule_data) * 100, 2)`% 
+
+#### Без выбросов
+
+```{r Height values number without outliers, echo=FALSE}
+height_filter_no_outliers <- 
+  cleaned_moule_data %>% 
+  select(Height) %>% 
+  mutate(remove = if_else(Height %in% boxplot.stats(Height)$out, "yes", "no")) %>% 
+  filter(Height <= height_thr, remove == "no") %>% 
+  select(-c(remove)) %>% 
+  nrow()
+```
+
+Процент моллюсков, у которых высота раковины (`Height`) не превышает  `r height_thr`, без учета выбросов составляет `r round(height_filter_no_outliers / nrow(cleaned_moule_data) * 100, 2)`%.
+
+В данном случае наличие выбросов не сильно повлияло на процент моллюсков, у которых высота раковины не превышает `r height_thr`.
+
+```{r Quantile thershold, include=FALSE}
+quantile_value <- 0.92
+```
+
+
+### Значение переменной `Length`, которое больше, чем у `r quantile_value * 100`% всех наблюдений
+
+Искомая величина - это квантиль `r quantile_value * 100`%
+
+#### С выбросами
+
+Значение квантиля `r quantile_value * 100`% для переменной `Length` = `r as.numeric(quantile(cleaned_moule_data$Length, probs = c(0, quantile_value, 1)))[2]` 
+
+#### Без выбросов
+
+```{r Length values without outliers, echo=FALSE}
+height_filter_no_outliers <- 
+  cleaned_moule_data %>% 
+  select(Length) %>% 
+  mutate(remove = if_else(Length %in% boxplot.stats(Length)$out, "yes", "no")) %>% 
+  filter(remove == "no") %>% 
+  select(-c(remove)) %>% 
+  pull(Length)
+```
+
+Значение квантиля `r quantile_value * 100`% для переменной `Length` = `r as.numeric(quantile(height_filter_no_outliers, probs = c(0, quantile_value, 1)))[2]`
+
+Здесь наличие выбросов никак не влияет на значение квантиля `r quantile_value * 100`%.
+
+### Z-score стандартизация переменной `Length`
+
+```{r Z-score standartization, echo=FALSE, message=FALSE, warning=FALSE}
+cleaned_moule_data <- 
+  cleaned_moule_data %>% 
+  group_by(Sex) %>% 
+  mutate(Length_z_score = round((Length - mean(Length)) / sd(Length), 3)) %>% 
+  ungroup()
+datatable(cleaned_moule_data, 
+          width = '100%',
+          options = list(scrollX = TRUE),
+          filter = "top",
+          rownames = FALSE)
+```
+
+Проверим правильность z-стандартизации. Для этого посчитаем среднее значение и стандартное отклонение значений, получиашихся после z-преобразования.
+
+```{r Check z-score standartization, echo=FALSE, message=FALSE, warning=FALSE}
+cleaned_moule_data %>% 
+  select(c(Sex, Length_z_score)) %>% 
+  group_by(Sex) %>% 
+  summarise(Mean = round(mean(Length_z_score)),
+            sd = round(sd(Length_z_score))) %>% 
+  ungroup() %>% 
+  datatable(width = '100%',
+            options = list(scrollX = TRUE),
+            rownames = FALSE)
+```
+
+Как видно из таблицы, значения соотвествуют ожидаемым.
+
+### Сравнение диаметра моллюсков с числом колец 5 и 15
+
+```{r Extract diameters with 5 and 15 rings, message=FALSE, warning=FALSE, include=FALSE}
+diam_table <- 
+  cleaned_moule_data %>% 
+  filter(Rings == 5 | Rings == 15) %>% 
+  select(c(Rings, Diameter))
+```
+
+Посмотрим на QQ-plot переменной `Diameter` для количества колец 5 и 15 чтобы проверить насколько распределение близко к нормальному.
+
+```{r QQ-plot for 5 and 15 rings, echo=FALSE, fig.height=7, fig.width=12, message=FALSE, warning=FALSE}
+ggplot(diam_table, aes(sample = Diameter, col = factor(Rings))) + 
+  geom_qq() + 
+  geom_qq_line() +
+  theme_minimal(base_size = 20) + 
+  scale_fill_brewer(type = "qualitative", palette = "Dark2") + 
+  scale_color_brewer(type = "qualitative", palette = "Dark2") + 
+  labs(fill = "Количество колец", color = "Количество колец",
+       x = "Теоритические квантили", y = "Значение данных", 
+       title = "QQ-plot распеределения значения диаметра\nотносительно теоритических квантилей")
+```
+
+Видно, что распределения этих двух выборок довольно близки к форме нормального распеределения.
+
+Для сравнения двух выборок с разным количеством колец используем t-тест Стьюдента
+
+Сначала посмотрим наличие выбросов в группе с 5 и 15 кольцами
+
+```{r Count outliers for 5 and 15 rings, echo=FALSE, message=FALSE}
+diam_table %>% 
+  group_by(Rings) %>% 
+  summarise(Outliers_number = length(boxplot.stats(Diameter)$Diameter)) %>% 
+  ungroup() %>% 
+  datatable(width = '100%',
+            options = list(scrollX = TRUE),
+            rownames = FALSE)
+```
+
+Выбросов нет, значит нет необходимости считать варианты с учетом выбросов и без них.
+
+```{r T-test for 5 and 15 rings, message=FALSE, warning=FALSE, include=FALSE}
+five_rings_diam <- diam_table$Diameter[diam_table$Rings == 5]
+fifteen_rings_diam <- diam_table$Diameter[diam_table$Rings == 15]
+ttest <- t.test(x = five_rings_diam, y = fifteen_rings_diam)
+```
+
+Результаты двухвыборочного t-теста Стьюдента с поправкой Уэлча показали наличие значимого различия (df = `r as.numeric(round(ttest$parameter))`, p-value = `r as.numeric(round(ttest$p.value, 2))`) по диаметру раковины между моллюсками с 5 (mean = `r round(as.numeric(ttest$estimate), 2)[1]`) и 15 (mean = `r round(as.numeric(ttest$estimate), 2)[2]`) кругами на раковине со стандартной ошибкой среднего равной `r round(as.numeric(ttest$stderr), 3)`
+
+Для построения графика рассчитаем доверительный 95% доверительный интервал для среднего значения диаметра у моллюсков с 5 и 15 кольцами.
+
+```{r Calculate CI, echo=FALSE, message=FALSE, warning=FALSE}
+summ <- round(summarySE(diam_table, "Diameter", groupvars = "Rings"), 3)
+datatable(summ, 
+          width = '100%',
+          options = list(scrollX = TRUE),
+          rownames = FALSE)
+```
+
+
+```{r Plot for 5 and 15 rings diameters, echo=FALSE,  fig.height=7, fig.width=12, message=FALSE, warning=FALSE}
+ggplot(summ, aes(x = factor(Rings), y = Diameter)) +
+  # geom_jitter(data = diam_table, aes(x = factor(Rings), y = Diameter),
+  #             position = position_jitter(0.03), alpha = 0.1) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = Diameter - ci, ymax = Diameter + ci), width = 0.04) +
+  theme_minimal(base_size = 20) +
+  labs(x = "Количество колец", y = "Диаметр",
+       title = "Среднее значение диаметра для моллюсков с 5 и 15 кольцами\nс 95% доверительным интервалом") +
+  scale_y_continuous(breaks = seq(0.2, 0.5, by = 0.1), limits = c(0.2, 0.5))
+```
+
+### Исследование взаимосвязи переменных `Diameter` и `Whole_weight`
+
+Сначала посмотрим на график взаимосвязи этих переменных
+
+```{r Correlation of diameter and whole weight plot, echo=FALSE,  fig.height=7, fig.width=12, message=FALSE, warning=FALSE}
+ggplot(cleaned_moule_data, aes(x = Diameter, y = Whole_weight)) + 
+  geom_point(position = "jitter", alpha = 0.5) + 
+  geom_smooth() +
+  theme_minimal(base_size = 20) + 
+  labs(x = "Диаметр", y = "Полный вес",
+       title = "Корелляция между значениями диаметра и полного веса моллюсков") + 
+  scale_y_continuous(limits = c(-0.2, 3))
+```
+
+По графику можно сделать вывод о том, что эти две переменных вероятно связаны нелинейно. Для оценки значимости коэффициента корреляции нужно использовать коэффициент корреляции Спирмена потому что он является непараметрическим и применим в случае нелинейной связи между величинами.
+
+```{r cor.test for diameter and whole_weight, echo=FALSE, message=FALSE, warning=FALSE}
+dw_cor <- cor.test(x = cleaned_moule_data$Diameter, 
+                   y = cleaned_moule_data$Whole_weight, 
+                   method = "spearman")
+```
+
+Коэффициент корреляции Спирмена равен `r round(dw_cor$estimate, 2)` со значением p-value = `r dw_cor$p.value`, что говорит о том, что коэффициент корреляции является значимым.
+
+## Дополнительные гипотезы
+
+### Количество колец у разных полов
+
+При внимательном рассмотрении графика из раздела [Оценка переменных на наличие взаимосвязей](#оценка-переменных-на-наличие-взаимосвязей) можно заметить, что графики зависимости количества колец от всех других переменных имеют составной характер. То есть, в то время как взаимосвязи других величин имеют равномерный характер, взаимосвязь количества колец с другими переменными имеет две четко выраженных части с изменением угла наклона кривой линии тренда около значения 10 переменной `Rings`. Это становится еще лучше видно, если построить график зависимости, например, переменной `Rings` от переменной `Length`.
+
+```{r Rings-Length correlation plot, echo=FALSE,  fig.height=7, fig.width=12, message=FALSE, warning=FALSE}
+ggplot(cleaned_moule_data, aes(x = Rings, y = Length)) + 
+  geom_jitter(aes(col = Sex), alpha = 0.7, width = 0.45) + 
+  geom_smooth(method = "loess", col = "black") +
+  theme_minimal(base_size = 20) + 
+  scale_color_brewer(type = "qualitative", palette = "Dark2") + 
+  labs(title = "Зависимость длины от количества колец",
+       x = "Количество колец", y = "Длина", col = "Пол") + 
+  scale_color_discrete(labels = c("Мужской", "Женский", "Ювенильный"))
+```
+
+Также, поскольку цвет точек на этом графике соответствует полу, то можно заметить, что почти все значения `uvenil` лежат в области с одним наклоном кривой, а все значения `male` и `female` - в другой. Очевидно, что среднее количество колец для молодых моллюсков будет сильно отличаться от взрослых, просто потому что они еще молодые. Интереснее будет ли отличаться количество колец у взрослых особей разного пола.
+
+Проверим наличие статистически значимых отличий с помощью t-теста Стьюдента
+
+```{r t-test of males and females rings number, message=FALSE, warning=FALSE, include=FALSE}
+male_rings_number = cleaned_moule_data$Rings[cleaned_moule_data$Sex == "male"]
+female_rings_number = cleaned_moule_data$Rings[cleaned_moule_data$Sex == "female"]
+ttest <- t.test(x = male_rings_number, y = female_rings_number)
+```
+
+Результаты двухвыборочного t-теста Стьюдента с поправкой Уэлча показали наличие значимой разницы (df = `r as.numeric(round(ttest$parameter))`, p-value = `r as.numeric(round(ttest$p.value, 3))`) по количеству колец моллюсков мужского (mean = `r round(as.numeric(ttest$estimate), 2)[1]`) и женского (mean = `r round(as.numeric(ttest$estimate), 2)[2]`) пола со стандартной ошибкой среднего равной `r round(as.numeric(ttest$stderr), 3)`
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+rings_male_female <- 
+  cleaned_moule_data %>% 
+  filter(Sex == "male" | Sex == "female") %>% 
+  select(c(Rings, Sex))
+rings_male_female_summ <- round(summarySE(rings_male_female, 
+                                          "Rings", groupvars = "Sex")[,-1], 3) %>% 
+  add_column(.before = T, Sex = c("male", "female"))
+datatable(rings_male_female_summ, 
+          width = '100%',
+          options = list(scrollX = TRUE),
+          rownames = FALSE)
+```
+
+
+```{r Build plot of males and females rings number, echo=FALSE,  fig.height=7, fig.width=12, message=FALSE, warning=FALSE}
+ggplot(rings_male_female, aes(x = Sex, y = Rings)) + 
+  stat_summary(fun = mean, geom = "point", size = 3) + 
+  stat_summary(fun.data = mean_cl_normal, geom = "errorbar", width = 0.06) + 
+  theme_minimal(base_size = 20) + 
+  labs(title = "Среднее количество колец у моллюсков мужского и женского пола\nc 95% доверительным интервалом",
+       x = "Пол", y = "Количество колец") + 
+  scale_x_discrete(labels = c("Мужской", "Женский"))
+```
+
+
+
+
+
+
