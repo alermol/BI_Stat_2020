@@ -1,0 +1,467 @@
+---
+title: "'Сколько стоит дом ~~построить~~'"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    number_section: true
+    theme: spacelab
+editor_options: 
+  chunk_output_type: inline
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, comment = "")
+```
+
+```{r Install and attach requring packages, echo=FALSE, message=FALSE, warning=FALSE}
+if (!require(MASS)) install.packages("MASS"); library("MASS") 
+if (!require(psych)) install.packages("psych"); library("psych") 
+if (!require(ggplot2)) install.packages("ggplot2"); library("ggplot2") 
+if (!require(gridExtra)) install.packages("gridExtra"); library("gridExtra") 
+if (!require(grid)) install.packages("grid"); library("grid")
+if (!require(car)) install.packages("car"); library("car")
+if (!require(dplyr)) install.packages("dplyr"); library("car")
+```
+
+```{r include=FALSE}
+theme_set(theme_minimal())
+```
+
+
+# Проверка выходных данных
+
+## Визуальная оценка данных
+Посмотрим на структуру данных
+```{r comment=""}
+str(Boston)
+```
+
+Переменные `chas` и `rad` являются факторными. Конвертируем их.
+```{r}
+Boston$chas <- as.factor(Boston$chas)
+Boston$rad <- as.factor(Boston$rad)
+```
+
+## Разведочный анализ данных
+Проверим на наличие пропущенных значений
+```{r}
+colSums(is.na(Boston))
+```
+Пропущенных значений нет
+
+Данные Boston были урезаны, а именно все значения переменной `medv` больше 50 были приравнены к 50.
+Для дальнейшего анализа уберем из таблицы строки, которые содержат в себе значения переменной `medv` равное 50.
+```{r}
+Boston <- subset(Boston, medv < 50)
+```
+
+### График взаимосвязей для количественных переменных
+```{r echo=FALSE, fig.height=8, fig.width=13, message=FALSE, warning=FALSE}
+pairs.panels(Boston[,-c(4,9)],
+             hist.col = "#1b9e77",
+             smoother = T,
+             ellipses = F,
+             stars = T,
+             scale = T, 
+             main = "Корреляции между переменными в данных (уровни значимости: *** - 0.001, ** - 0.01, * - 0.05)",
+             cex.labels = 1.4)
+```
+На графике можно увидеть, что переменная `lstat` нелинейно связана с переменной `medv`. Для исправления этой ситуации проведем log-трансформацию этой переменной и построим график чтобы оценить результат преобразования.
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+Boston$lstat_log <- log(Boston$lstat)
+
+before <- ggplot(Boston, aes(x = lstat, y = medv)) + 
+  geom_point() +
+  geom_smooth() + 
+  labs(title = "До трансформации") + 
+  xlab("Переменная 'lstat'") +
+  ylab("Переменная 'medv'")
+after <- ggplot(Boston, aes(x = lstat_log, y = medv)) +
+  geom_point() +
+  geom_smooth() +
+  labs(title = "После трансформации") + 
+  xlab("Трансфомированная переменная 'lstat'") +
+  ylab("Переменная 'medv'")
+grid.arrange(before, after, nrow = 1)
+```
+
+После преобразования взаимосвязь этих двух переменных выглядит более линейно.
+
+# Построение полной модели
+Для построения модели будем брать все придикторы кроме `chas` чтобы не усложнять модель бинарным придктором.
+```{r}
+full_model <- lm(medv ~ scale(crim) + scale(zn) + scale(indus) + scale(nox) +
+                   scale(rm) + scale(age) + scale(dis) + rad + scale(tax) +
+                   scale(ptratio) + scale(black) + scale(lstat_log),
+                 data = Boston)
+```
+
+## Диагностика модели
+Для оценки качества модели проведем её диагностику. Для этого создадим таблицу с данными для диагностики модели.
+```{r}
+model_diag <- fortify(full_model)
+```
+
+### Проверка линейности взаимосвязи и отсутствия паттерна в остатках
+Для проверки линейности взаимосвязи и наличия гомоскедастичность дисперсии построим график остатков модели.
+```{r message=FALSE, warning=FALSE}
+ggplot(model_diag, aes(x = .fitted, y = .stdresid)) +
+  geom_point() + 
+  geom_hline(yintercept = 0) + 
+  geom_hline(yintercept = 2, color = "red", linetype = "dashed") +
+  geom_hline(yintercept = -2, color = "red", linetype = "dashed") +
+  geom_smooth() + 
+  labs(title = "Распределение стандартизирвоанных остатков модели")
+```
+
+На графике видно, что присутствует явная нелинейность взаимосвязи и гетероскедастичность остатков, что плохо для модели.
+
+### Проверка наличия влиятельных наблюдений
+Для проверки наличия влиятельных наблюдений построим график расстояний Кука.
+```{r echo=FALSE}
+ggplot(model_diag, aes(x = 1:nrow(model_diag), y = .cooksd)) + 
+  geom_bar(stat = "identity") + 
+  labs(title = "Расстояния Кука") + 
+  xlab("Номер наблюдения") +
+  ylab("Расстояние Кука")
+```
+
+Как видно на графике, в полной модели нет влиятельных наблюдений.
+
+### Проверка независимости наблюдений
+Для проверки независимости наблюдений построим график зависимости зачений этих предикторов от остатков в модели. Такую проверку необходимо проводить для всех предикторов (вошедших и не вошедших в модель), поэтому добавим предиктор `chas`, который не вошел в модель, в диагностическую таблицу
+```{r}
+model_diag$chas <- Boston$chas
+```
+
+И построим графики для всех предикторов
+```{r echo=FALSE, fig.height=17, fig.width=10, message=FALSE, warning=FALSE}
+base_plot <- ggplot(model_diag, aes(y = .stdresid)) + theme_minimal()
+crim <- base_plot + aes(x = `scale(crim)`) + geom_point() + geom_smooth()
+zn <- base_plot + aes(x = `scale(zn)`) + geom_point() + geom_smooth()
+indus <- base_plot + aes(x = `scale(indus)`) + geom_point() + geom_smooth()
+nox <- base_plot + aes(x = `scale(nox)`) + geom_point() + geom_smooth()
+rm <- base_plot + aes(x = `scale(rm)`) + geom_point() + geom_smooth()
+age <- base_plot + aes(x = `scale(age)`) + geom_point() + geom_smooth()
+dis <- base_plot + aes(x = `scale(dis)`) + geom_point() + geom_smooth()
+rad <- base_plot + aes(x = rad) + geom_boxplot()
+tax <- base_plot + aes(x = `scale(tax)`) + geom_point() + geom_smooth()
+ptratio <- base_plot + aes(x = `scale(ptratio)`) + geom_point() + geom_smooth()
+black <- base_plot + aes(x = `scale(black)`) + geom_point() + geom_smooth()
+lstat_log <- base_plot + aes(x = `scale(lstat_log)`) + geom_point() + geom_smooth()
+chas <- base_plot + aes(x = chas) + geom_boxplot(width = 0.1)
+
+grid.arrange(crim, zn,
+             indus, nox,
+             rm, age,
+             dis, rad,
+             tax, ptratio,
+             black, lstat_log, chas,
+             nrow = 7, ncol = 2)
+```
+На графиках видно для предикторов в модели независимость наблюдений не соблюдается только для предиктора `rm`. Предиктор `rad` не показывает разницу в распределении остатков между градациями фактора. То же верно и для предиктора не в модели `chas`.
+
+### Проверка на нормальность распределения остатков
+Для проверки пострим QQ-plot
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+qqPlot(full_model, ylab = "Стьюдентизированные остатки полной модели",
+       xlab = "t-квантили")
+```
+Верхняя часть графика немного уходит вверх, что указывает на нарушение нормальности распределения.
+
+## Предсказания модели
+Найдем предиктор с самым большим по модулю коэффициентом
+```{r}
+coef(full_model)
+```
+Самым большим по модулю коэффициентом обладает одна из градаций фактора `rad`, но строить предсказания от неудобно, поэтому возьмем предиктор со вторым по размеру коэффициентом. Это `lstat_log`.
+Построим график предсказания по этому предиктору для каждой градации фактора `rad`.
+
+Для начала создадим тестовый датафрейм.
+```{r}
+test_dataframe <- Boston %>% 
+  group_by(rad) %>% do(data.frame(lstat_log = seq(min(.$lstat_log), max(.$lstat_log), length.out = 1000)))
+test_dataframe$crim <- mean(Boston$crim)
+test_dataframe$zn <- mean(Boston$zn)
+test_dataframe$nox <- mean(Boston$nox)
+test_dataframe$rm <- mean(Boston$rm) 
+test_dataframe$age <- mean(Boston$age)
+test_dataframe$dis <- mean(Boston$dis)
+test_dataframe$tax <- mean(Boston$tax)
+test_dataframe$ptratio <- mean(Boston$ptratio)
+test_dataframe$black <- mean(Boston$black)
+test_dataframe$indus <- mean(Boston$indus)
+test_dataframe$lstat <- exp(test_dataframe$lstat_log)
+```
+
+И предскажем значения отклика.
+```{r}
+prediction <- predict(full_model, newdata = test_dataframe, interval = "conf")
+test_dataframe <- data.frame(test_dataframe, prediction)
+```
+
+Теперь на основе предсказаний можно построить график
+```{r}
+ggplot(test_dataframe, aes(x = lstat, y = fit)) + 
+  theme_minimal() +
+  geom_ribbon(data = test_dataframe, aes(x = lstat, ymin = lwr, ymax = upr, fill = rad), alpha = 0.2) +
+  geom_line(aes(colour = rad), size = 0.7) +
+  scale_fill_brewer(type = "diverging", palette = "RdYlBu") +
+  geom_point(data = Boston, aes(x = lstat, y = medv, col = rad), size = 0.5) + 
+  xlab("Перменная 'lstat'") +
+  ylab("Предсказанные значения переменной 'medv'") + 
+  labs(title = "Предсказания полной модели")
+```
+
+Диагностика полученной модели показала наличие гетерогенности дисперсии, отклонения распределеня остатков от нормального и отсуствие независимости для некоторых предикторов.
+
+В процессе исследования модели не была произведена проверка на мультиколлинеарность, наличие которой ухудшает модель.
+Присутствие мультиколлинеарности можно определить по увеличению раздувания дисперсии предикторами, а степень разудвания дисперсии предикторами можно рассчитать показатель VIF. Посчитаем этот показатель для всех предикторов в полной модели.
+```{r}
+vif(full_model)
+```
+Показатель VIF в модели >2 для многих предикторов, что говорит о наличии сильной мультиколлинеарности.
+
+Посмотрим на общую информацию по получившейся модели.
+```{r}
+summary(full_model)
+```
+Можно увидеть, что часть предикторов незначима, но смотря на это R^2^ составляет 0.81, что довольно высоко. Однако, несмотря на это, модель требует значительного улучшения и не может использоваться в таком виде.
+
+# Оптимизация модели
+Для улучшения построим модель, идентичную полной, но без стандартизации предикторов.
+```{r}
+full_model <- lm(medv ~ crim + zn + indus + nox + rm + age + dis + rad + tax + 
+                   ptratio + black + log(lstat), data = Boston)
+```
+
+## Итерация 1
+Удалим из модели те предикторы, которые не ухудшат модель. Для этого выясним что это за предикторы.
+```{r}
+drop1(full_model, test = "F")
+```
+Как видно из результатов, удаление предикторов `indus` и `age` незначимо влияет на количество объясненной с помощью модели изменчивости. Их можно удалить.
+
+```{r}
+mod1 <- update(full_model, . ~ . - indus - age)
+```
+
+Теперь посмотрим какие из оставшихся предикторов раздувают дисперсию.
+```{r}
+vif(mod1)
+```
+Как видно, предиктор `rad` очень сильно раздувает дисперсию, а значит его нужно удалить для улучшения модели.
+
+```{r}
+mod1 <- update(mod1, . ~ . - rad)
+```
+
+Посмотрим на модель, которая получилась после первого раунда оптимизации.
+```{r}
+summary(mod1)
+```
+Видны незначимые предикторы, значит возможно потребуется следующий раунд оптимизации.
+
+
+## Итерация 2
+Посмотрим какие предикторы можно удалить без ущерба количеству изменчивости, объяснямой с помощью модели.
+```{r}
+drop1(mod1, test = "F")
+```
+
+Как видно в таблице, без вреда для модели можно удалить предикторы `zn` и `tax`.
+```{r}
+mod2 <- update(mod1, . ~ . - zn - tax)
+```
+
+Посмотрим на фактор раздувания дисперсии для получившейся модели.
+```{r}
+vif(mod2)
+```
+
+Предиктор `nox` раздувает дисперсию сильнее всего. Удалим его.
+```{r}
+mod2 <- update(mod2, . ~ . - nox)
+```
+
+Посмотрим на общую информацию о новой модели
+```{r}
+summary(mod2)
+```
+Несмотря на то, что R^2^ слегка упал, F-статистика модели значительно выросла, что говорит о том, что модель улучшилась.
+
+## Итерация 3
+В получившейся модели всем предикторы значимые, но стоит еще раз посмотреть можно ли убрать какой-либо из них без ущерба для предсказательной силы модели.
+```{r}
+drop1(mod2, test = "F")
+```
+Тест не показал наличие предикторов, которые можно убрать не ухудшив модель.
+
+Посмотрим раздувает ли дисперсию какой-нибудь предиктор.
+```{r}
+vif(mod2)
+```
+
+Предиктор `log(lstat)` имеет значение VIF>2. Можно попробовать его удалить и посмотреть как это повлияет на модель
+```{r}
+mod3 <- update(mod2, . ~ . - log(lstat))
+```
+
+И посмотрим на общую информацию о получившейся модели.
+```{r}
+summary(mod3)
+```
+Модель сильно ухудшлась как по показателям R^2^, так и по F-статистике. Этот предиктор удалять не нужно.
+
+## Итерация 4
+В модели 2 можно заметить, что предикторы `rm`, `ptratio` и `log(lstat)` имеют высокий уровень значимости. Учитывание взаимодействия между ними может позволить получить лучшую модель.
+```{r}
+mod3 <- update(mod2, . ~ . + rm*ptratio + rm*log(lstat) + ptratio*log(lstat))
+```
+
+## Финальная модель
+Посмотрим на общую инфомрацию по получившейся модели
+```{r}
+summary(mod3)
+```
+
+Добавление в модель взаимодействия предикторов действительно сильно улучшило модель.
+
+Эта модель имеет следующую формулу:
+
+**medv = -175.16 - 0.1 * crim + 29.96 * rm - 0.37 * dis + 8.52 * ptratio + 0.01 * black + 22.91 * log(lstat) - 1.15 * rm * ptratio - 2.35 * rm * log(lstat) - 0.81 * ptratio * log(lstat)**
+
+## Диагностика полученной оптимальной модели
+```{r}
+model_diag <- fortify(mod3)
+```
+
+### Проверка наличия линейной взаимосвязи и отсутствия паттерна в остатках
+```{r}
+ggplot(model_diag, aes(x = .fitted, y = .stdresid)) + 
+  geom_point() + 
+  geom_hline(yintercept = 0) + 
+  geom_hline(yintercept = 2, linetype = "dashed", color = "red") + 
+  geom_hline(yintercept = -2, linetype = "dashed", color = "red") + 
+  geom_smooth()
+```
+
+По сравнению с полной моделю, эта модель имеет гораздо более линейный паттерн распределения остатков.
+
+### Наличие влиятельных наблюдений
+```{r}
+ggplot(model_diag, aes(x = 1:nrow(model_diag), y = .cooksd)) + 
+  geom_bar(stat = "identity")
+```
+
+В модели нет влиятельных наблюдений.
+
+### Проверка условия независимости
+Сначала построим графики зависимости остатков от предикторов в модели.
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+base_plot <- ggplot(model_diag, aes(y = .stdresid)) + theme_minimal()
+crim <- base_plot + aes(x = crim) + geom_point() + geom_smooth()
+rm <- base_plot + aes(x = rm) + geom_point() + geom_smooth()
+dis <- base_plot + aes(x = dis) + geom_point() + geom_smooth()
+ptratio <- base_plot + aes(x = ptratio) + geom_point() + geom_smooth()
+black <- base_plot + aes(x = black) + geom_point() + geom_smooth()
+lstat_log <- base_plot + aes(x = `log(lstat)`) + geom_point() + geom_smooth()
+
+grid.arrange(crim, rm,
+             dis, ptratio,
+             black, lstat_log,
+             nrow = 3, ncol = 2)
+```
+
+Видно, что независимость соблюдается для всех предикторов кроме `rm`, у которого существует небольшой паттерн в распределении остатков.
+
+
+Теперь построим графики для предикторов, которые были исключены из модели.
+```{r}
+base_plot <- ggplot(fortify(full_model), aes(y = .stdresid)) + theme_minimal()
+zn <- base_plot + aes(x = zn) + geom_point() + geom_smooth()
+indus <- base_plot + aes(x = indus) + geom_point() + geom_smooth()
+nox <- base_plot + aes(x = nox) + geom_point() + geom_smooth()
+age <- base_plot + aes(x = age) + geom_point() + geom_smooth()
+tax <- base_plot + aes(x = tax) + geom_point() + geom_smooth()
+
+
+grid.arrange(zn, indus,
+             nox, age,
+             tax,
+             nrow = 3, ncol = 2)
+```
+
+В исключенных предикторах нет заметных паттернов и неучтенных зависимостей.
+
+### Проверка на нормальность распределения остатков
+```{r}
+qqPlot(mod3)
+```
+
+На графике видно, что большинство точек лежит близко от прямой и только часть точке в верхней части графике сильнее отклоняется от предсказанных значений.
+
+
+## Предсказания оптимальной модели
+Для начала снова создадим тестовый датафрейм. Предиктором с самым большим по модулю коэффициентом является `rm`
+```{r}
+test_dataframe <- data.frame(rm = seq(min(Boston$rm),
+                                      max(Boston$rm),
+                                      length.out = 1000))
+test_dataframe$crim <- mean(Boston$crim)
+test_dataframe$dis <- mean(Boston$dis)
+test_dataframe$ptratio <- mean(Boston$ptratio)
+test_dataframe$black <- mean(Boston$black)
+test_dataframe$lstat <- exp(mean(Boston$lstat_log))
+```
+
+И предскажем значения
+```{r}
+prediction <- predict(mod3, newdata = test_dataframe, interval = "conf")
+test_dataframe <- data.frame(test_dataframe, prediction)
+```
+
+
+```{r}
+ggplot(test_dataframe, aes(x = rm, y = fit)) + 
+  theme_minimal() +
+  geom_ribbon(data = test_dataframe, aes(x = rm, ymin = lwr, ymax = upr), alpha = 0.2) +
+  geom_line(size = 0.7) +
+  scale_fill_brewer(type = "diverging", palette = "RdYlBu") +
+  geom_point(data = Boston, aes(x = rm, y = medv), size = 0.5)
+```
+
+## Выводы из результатов оптимальной модели
+Еще раз посмортрим на общую информацию по полученной оптимальной модели.
+```{r}
+summary(mod3)
+```
+Из коэффициентов этой модели можно сделать вывод, что чтобы максимизировать стоимость домов, они должны располагаться в районах с более низким статусом населения (предиктор `lstat`) и в среднем иметь больше комнат (предиктор `rm`). 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
