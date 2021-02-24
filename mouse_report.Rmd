@@ -1,0 +1,283 @@
+---
+title: "Уровень каких белков различается в мышиной модели синдрома Дауна "
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    number_section: true
+    theme: spacelab
+editor_options: 
+  chunk_output_type: inline
+---
+
+<!-- Параметры системы, на которых была произведена успешная компиляция отчета -->
+<!-- R version 3.6.3 (2020-02-29) -->
+<!-- Platform: x86_64-pc-linux-gnu (64-bit) -->
+<!-- Running under: Ubuntu 20.04.2 LTS -->
+
+<!-- Matrix products: default -->
+<!-- BLAS:   /usr/lib/x86_64-linux-gnu/blas/libblas.so.3.9.0 -->
+<!-- LAPACK: /usr/lib/x86_64-linux-gnu/lapack/liblapack.so.3.9.0 -->
+
+<!-- locale: -->
+<!--  [1] LC_CTYPE=ru_RU.UTF-8       LC_NUMERIC=C               LC_TIME=ru_RU.UTF-8        -->
+<!--  [4] LC_COLLATE=ru_RU.UTF-8     LC_MONETARY=ru_RU.UTF-8    LC_MESSAGES=ru_RU.UTF-8    -->
+<!--  [7] LC_PAPER=ru_RU.UTF-8       LC_NAME=C                  LC_ADDRESS=C               -->
+<!-- [10] LC_TELEPHONE=C             LC_MEASUREMENT=ru_RU.UTF-8 LC_IDENTIFICATION=C        -->
+
+<!-- attached base packages: -->
+<!-- [1] grid      stats     graphics  grDevices utils     datasets  methods   base      -->
+
+<!-- other attached packages: -->
+<!--  [1] scales_1.1.1     plyr_1.8.6       plotly_4.9.3     devtools_2.3.2   -->
+<!--  [5] usethis_2.0.1    factoextra_1.0.7 multcomp_1.4-16  TH.data_1.0-10   -->
+<!--  [9] MASS_7.3-51.5    survival_3.1-8   mvtnorm_1.1-1    DT_0.17          -->
+<!-- [13] dplyr_1.0.3      car_3.0-10       carData_3.0-4    ggplot2_3.3.3 -->
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, comment = "")
+```
+
+```{r Install and attach requring packages, echo=FALSE, message=FALSE, warning=FALSE}
+if (!require(ggplot2)) install.packages("ggplot2"); library("ggplot2") 
+if (!require(car)) install.packages("car"); library("car")
+if (!require(dplyr)) install.packages("dplyr"); library("dplyr")
+if (!require(DT)) install.packages("DT"); library("DT")
+if (!require(multcomp)) install.packages("multcomp"); library("multcomp")
+if (!require(factoextra)) install.packages("factoextra"); library("factoextra")
+if (!require(devtools)) install.packages("devtools"); library("devtools")
+if (!require(plotly)) install.packages("plotly"); library("plotly")
+install_github("vqv/ggbiplot")
+```
+
+```{r include=FALSE}
+theme_set(theme_minimal())
+```
+
+
+# Загрузка данных
+
+```{r}
+mouse_data <- read.csv("Data_Cortex_Nuclear.csv", dec = ",")
+```
+
+
+
+# Описание датасета
+
+В 2015 году на мышиной модели были проведены исследования как синдром Дауна
+влияет на изменения уровней различных белков. В таблице представлены уровни 
+экспрессии 77 белков в коре больших полушарий мышей контрольной группы и 
+больных синдромом Дауна. 
+
+## Количество мышей
+Для подсчета количества мышей посчитаем количество уникальных префиксов в 
+названии мышей в столбце MouseID.
+```{r}
+mouse_number <- length(unique(gsub("_[0-9]+", "", mouse_data$MouseID)))
+```
+
+Всего в эксперименте участвовали ```r mouse_number``` уникальных мыши.
+
+
+## Классы в данных
+Основываясь на колонке `class` можно выделить 8 классов
+```{r}
+levels(mouse_data$class)
+```
+* c-CS-s: контрольные мыши, стимулированные обучаться, инъецированные физраствором
+* c-CS-m: контрольные мыши, стимулированные обучаться, инъецированные мемантином
+* c-SC-s: контрольные мыши, не стимулированные обучаться, инъецированные физраствором
+* c-SC-m: контрольные мыши, не стимулированные обучаться, инъецированные мемантином
+* t-CS-s: трисомные мыши, стимулированные обучаться, инъецированные физраствором
+* t-CS-m: трисомные мыши, стимулированные обучаться, инъецированные мемантином
+* t-SC-s: трисомные мыши, не стимулированные обучаться, инъецированные физраствором
+* t-SC-m: трисомные мыши, не стимулированные обучаться, инъецированные мемантином
+
+В каждом классе находится от 7 до 10 мышей
+```{r}
+mouse_data %>% 
+  mutate(MouseID = gsub("_[0-9]+", "", MouseID)) %>% 
+  distinct(MouseID, .keep_all = T) %>% 
+  group_by(class) %>% 
+  summarise(mouse_number = n()) %>% 
+  ungroup() %>% 
+  datatable(width = '100%',
+            options = list(scrollX = F),
+            rownames = F)
+```
+
+Это говорит о несбаланированности групп по количеству мышей.
+
+
+## Количество полных наблюдений
+```{r}
+NA_table <- mouse_data %>% 
+  mutate_all(list(~na_if(., "")))
+complete_cases <- sum(complete.cases(NA_table))
+```
+Данные содержат ```r complete_cases``` полных наблюдения.
+
+
+# Сравнение экспрессии белка BDNF_N по классам
+Для сравнения схлопнем повторности по каждой мыши в среднее по повторностям
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+md_unrep <- 
+  mouse_data[c("MouseID", "BDNF_N", "class")] %>% 
+  mutate(MouseID = gsub("_[0-9]+", "", MouseID)) %>% 
+  mutate_all(list(~na_if(., ""))) %>% 
+  na.omit() %>% 
+  group_by(MouseID) %>%
+  summarize(class = class,
+            BDNF_N_mean = mean(BDNF_N)) %>% 
+  unique()
+md_unrep
+```
+
+Для нахождния различий воспользуемся однофакторным дисперсионным анализом
+```{r}
+aov_res <- aov(BDNF_N_mean ~ class, data = md_unrep)
+summary(aov_res)
+```
+
+Результаты показывают, что есть значимые различия в уровне экспресси белка 
+BDNF_N в зависимости от класса, которому принадлежат мыши. Чтобы определить 
+классы, которые имеют отличия, воспользуемся критерием Тьюки для попарного 
+сравнения.
+```{r}
+summary(glht(aov_res, linfct = mcp(class = "Tukey")))
+```
+
+Критерий показал наличие значимых (p-value = 0.045) различий между классами 
+c-SC-m и c-CS-s.
+
+# Линейная модель для предсказания уровня продукции белка ERBB4_N на основании данных о других белках в эксперименте
+
+
+## Построение полной модели
+Для построения полной модели возьмем все колонки, где присутствуют числовые 
+данные - это уровни белков и исключим строки с неполными данными
+```{r}
+md_lin_model <- 
+  mouse_data %>% 
+  select(where(is.numeric)) %>% 
+  filter(complete.cases(.))
+```
+
+Построим полную модель для данных
+```{r}
+full_model <- lm(ERBB4_N ~ ., data = md_lin_model)
+```
+
+
+## Диагностика полной модели
+Для оценки качества модели проведем её диагностику. Для этого создадим таблицу 
+с данными для диагностики модели.
+```{r}
+model_diag <- fortify(full_model)
+```
+
+
+### Проверка линейности взаимосвязи и отсутствия паттерна в остатках
+Для проверки линейности взаимосвязи и наличия гомоскедастичность дисперсии 
+построим график остатков модели.
+```{r message=FALSE, warning=FALSE}
+ggplot(model_diag, aes(x = .fitted, y = .stdresid)) +
+  geom_point() + 
+  geom_hline(yintercept = 0) + 
+  geom_hline(yintercept = 2, color = "red", linetype = "dashed") +
+  geom_hline(yintercept = -2, color = "red", linetype = "dashed") +
+  geom_smooth() + 
+  labs(title = "Распределение стандартизированных остатков модели")
+```
+
+На графике видно, что присутствует паттерн в остатках модели и нелинейность 
+взаимосвязи
+
+
+### Проверка наличия влиятельных наблюдений
+Для проверки наличия влиятельных наблюдений построим график расстояний Кука.
+```{r echo=FALSE}
+ggplot(model_diag, aes(x = 1:nrow(model_diag), y = .cooksd)) + 
+  geom_bar(stat = "identity") + 
+  labs(title = "Расстояния Кука") + 
+  xlab("Номер наблюдения") +
+  ylab("Расстояние Кука")
+```
+
+Как видно на графике, в полной модели нет влиятельных наблюдений.
+
+
+### Проверка нормальности распределения остатков
+Для проверки пострим QQ-plot
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+qqPlot(full_model, ylab = "Стьюдентизированные остатки полной модели",
+       xlab = "t-квантили")
+```
+
+График показывает, что распрделение остатков модели близко к нормальному 
+с несколькими выбивающимися наблюденями
+
+Посмотрим на summary модели
+```{r}
+summary(full_model)
+```
+
+
+Несмотря на то, что модель кажется нормальной и показывает наличие 
+статистически значимых предикторов, её нельзя использовать из-за 
+того, что в данных, по которым она построена, присутствуют повторности, что 
+нарушает требование для независимости наблюдений для построения линейной 
+модели.
+
+
+# Анализ главных компонент (PCA)
+## Ординация
+Для ординации удалим строки с пропущенными данными из таблицы
+```{r}
+pca_dataset <- 
+    mouse_data %>% 
+    filter(complete.cases(.))
+mouse_pca <- prcomp(md_lin_model, center = T, scale. = T)
+summary(mouse_pca)
+```
+
+Построим график информационной нагрузки для первых 10 компонент
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+pca_summ <- get_eigenvalue(mouse_pca)
+fviz_eig(mouse_pca,
+         addlabels = TRUE,
+         ylim = c(0, 50), 
+         main = 'График информационной нагрузки первых 10 главных компонент',
+         ylab = 'Процент объясненной компонентой вариации',
+         xlab = 'Номер главной компоненты') + 
+    geom_hline(yintercept = 8, color = "red", linetype = "dashed")
+```
+
+По графику видно, что можно оставить первые 4 компоненты - они несут 
+максимальную информационную нагрузку
+
+
+## График факторых нагрузок 
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+classes <- unique(mouse_data$class)
+ggbiplot::ggbiplot(mouse_pca, groups = pca_dataset$class, var.axes = F,
+                   ellipse = T) + 
+    scale_color_brewer(palette = "Set1")
+```
+
+На графике некоторые классы, например c-CS-s и c-CS-m образуют 
+непересекающиеся кластеры.
+
+
+## Трехмерный график первых трех главных компонент
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+plot_ly(as.data.frame(mouse_pca$x),
+         x = ~PC1, y = ~PC2, z = ~PC3,
+         color = ~pca_dataset$class,
+         size = 0.5)
+
+```
+
