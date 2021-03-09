@@ -1,0 +1,295 @@
+---
+title: "Это передача 'Сдохни или умри!'"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    number_section: true
+    theme: spacelab
+editor_options: 
+  chunk_output_type: inline
+---
+
+<!-- Параметры системы, на которых была произведена успешная компиляция отчета -->
+<!-- R version 3.6.3 (2020-02-29) -->
+<!-- Platform: x86_64-pc-linux-gnu (64-bit) -->
+<!-- Running under: Ubuntu 20.04.2 LTS -->
+
+<!-- Matrix products: default -->
+<!-- BLAS:   /usr/lib/x86_64-linux-gnu/blas/libblas.so.3.9.0 -->
+<!-- LAPACK: /usr/lib/x86_64-linux-gnu/lapack/liblapack.so.3.9.0 -->
+
+<!-- locale: -->
+<!--  [1] LC_CTYPE=ru_RU.UTF-8       LC_NUMERIC=C               LC_TIME=ru_RU.UTF-8        -->
+<!--  [4] LC_COLLATE=ru_RU.UTF-8     LC_MONETARY=ru_RU.UTF-8    LC_MESSAGES=ru_RU.UTF-8    -->
+<!--  [7] LC_PAPER=ru_RU.UTF-8       LC_NAME=C                  LC_ADDRESS=C               -->
+<!-- [10] LC_TELEPHONE=C             LC_MEASUREMENT=ru_RU.UTF-8 LC_IDENTIFICATION=C        -->
+
+<!-- attached base packages: -->
+<!-- [1] stats     graphics  grDevices utils     datasets  methods   base      -->
+
+<!-- other attached packages: -->
+<!-- [1] ggfortify_0.4.11 survminer_0.4.8  ggpubr_0.4.0     dplyr_1.0.4      survival_3.2-7   -->
+<!-- [6] ggplot2_3.3.3    -->
+
+```{css, echo=FALSE}
+.header-section-number::after {
+  content: ".";
+}
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+```
+
+```{r echo = FALSE, message=FALSE, warning=FALSE}
+# Absent packages will be installed
+if (!require(ggplot2)) install.packages("ggplot2"); library('ggplot2')
+if (!require(survival)) install.packages("survival"); library('survival')
+if (!require(dplyr)) install.packages("dplyr"); library('dplyr')
+if (!require(survminer)) install.packages("survminer"); library('survminer')
+if (!require(ggfortify)) install.packages("ggfortify"); library('ggfortify')
+```
+
+```{r include=FALSE}
+theme_set(theme_minimal())
+```
+
+
+# Описание данных
+## Описание датасета
+```{r}
+data('ovarian')
+str(ovarian)
+```
+Датасет содержит данные сравнения рандомизированных испытаний двух типов 
+лечения рака яичников
+
+Датасет содержит следующие переменные:
+
+  * futime:	время выживания или цензурирования
+  
+  * fustat:	статус цензурирования
+  
+  * age:	возраст в годах
+  
+  * resid.ds:	наличие остаточной болезни (1=нет,2=да)
+  
+  * rx:	тип лечения
+  
+  * ecog.ps:	ECOG статус (1 - лучше)
+
+Переведем переменные `resid.ds`, `rx` и `ecog.ps` в факторы
+```{r}
+ovarian <- 
+    ovarian %>% 
+    mutate(resid.ds = factor(resid.ds,
+                             levels = c(1, 2),
+                             labels = c('No', 'Yes')),
+           rx = factor(rx),
+           ecog.ps = factor(ecog.ps))
+str(ovarian)
+```
+
+# EDA датасета
+## Количество цензурированных наблюдений
+```{r}
+ovarian %>% 
+    group_by(fustat) %>% 
+    summarise(n = n())
+```
+
+Более половины наболюдений цензурировано
+
+## Количество наблюдений для разных типов лечения
+```{r}
+ovarian %>% 
+    group_by(rx) %>% 
+    summarise(n = n())
+```
+
+В группе для каждого типа лечения одинаковое количество испытуемых
+
+## Распределение возрастов
+### По группе лечения
+```{r}
+ggplot(ovarian, aes(x = age, fill = rx, color = rx)) + 
+  geom_dotplot(binwidth = 1, alpha = 0.6) +
+  labs(title = "Распределение возраста пацентов в разных группах лечения") +
+  xlab('Возраст') +
+  ylab('Частота') +
+  scale_fill_brewer(palette = "Set1") +
+  guides(fill = guide_legend(title = "Тип лечения"),
+         color = guide_legend(title = "Тип лечения")) +
+  theme(plot.title = element_text(size = 14, face = "bold", hjust = 0.5))
+```
+
+
+### По цензурированию
+```{r}
+ggplot(ovarian, aes(x = age,
+                    fill = factor(fustat,
+                                  levels = c(0, 1),
+                                  labels = c('Цензурирован', 'Выжил')),
+                    color = factor(fustat,
+                                   levels = c(0, 1),
+                                   labels = c('Цензурирован', 'Выжил')))) + 
+  geom_dotplot(binwidth = 1, alpha = 0.6) +
+  labs(title = "Распределение цензурирвоания пацентов в разных группах лечения") +
+  xlab('Возраст') +
+  ylab('Частота') +
+  scale_fill_brewer(palette = "Set1") +
+  guides(fill = guide_legend(title = "Тип пацента"),
+         color = guide_legend(title = "Тип пациента")) +
+  theme(plot.title = element_text(size = 14, face = "bold", hjust = 0.5))
+```
+
+
+# Кривые Каплана-Мейера
+## Кривые без группировки по факторам
+```{r}
+km_curva <- with(ovarian, Surv(futime, fustat))
+km_curva
+```
+
+```{r}
+km_fit1 <- survfit(Surv(futime, fustat) ~ 1, data = ovarian)
+autoplot(km_fit1)
+```
+
+```{r}
+km_fit2 <- survfit(Surv(futime, fustat) ~ rx, data = ovarian)
+autoplot(km_fit2) +
+  scale_color_brewer(palette = "Set1") + 
+  scale_fill_brewer(palette = "Set1") +
+  guides(fill = guide_legend(title = "Тип лечения"),
+         color = guide_legend(title = "Тип лечения")) +
+  labs(title = "Кривая выживаемости пациентов различных типов лечения") +
+  theme(plot.title = element_text(size = 14, face = "bold", hjust = 0.5))
+```
+
+## Комбинирование факторов
+### Возраст
+```{r}
+ovarian$age_group <- factor(ifelse(ovarian$age >= mean(ovarian$age), 'AA', 'BA'))
+km_fit3 <- survfit(Surv(futime, fustat) ~ age_group, data = ovarian)
+autoplot(km_fit3) +
+  scale_color_brewer(palette = "Set1") + 
+  scale_fill_brewer(palette = "Set1") +
+  guides(fill = guide_legend(title = "Возрастная\nгруппа"),
+         color = guide_legend(title = "Возрастная\nгруппа")) +
+  labs(title = "Кривая выживаемости пациентов различных возрастных групп") +
+  theme(plot.title = element_text(size = 14, face = "bold", hjust = 0.5))
+```
+
+### Возраст и тип лечения
+```{r}
+ovarian$age_trt <- factor(apply(ovarian[, c(5, 7)], 1, paste, collapse = '_'))
+km_fit4 <- survfit(Surv(futime, fustat) ~ age_trt, data = ovarian)
+autoplot(km_fit4) +
+  scale_color_brewer(palette = "Set1") + 
+  scale_fill_brewer(palette = "Set1") +
+  guides(fill = guide_legend(title = "Возрастная группа и\nтип лечения"),
+         color = guide_legend(title = "Возрастная группа и\nтип лечения")) +
+  labs(title = "Кривая выживаемости пациентов различных\nвозрастных групп и типов лечения") +
+  theme(plot.title = element_text(size = 14, face = "bold", hjust = 0.5))
+```
+
+### Возраст и остаточное заболевание
+```{r}
+ovarian$age_res <- factor(apply(ovarian[, c(4, 7)], 1, paste, collapse = '_'))
+km_fit5 <- survfit(Surv(futime, fustat) ~ age_res, data = ovarian)
+autoplot(km_fit5) +
+  scale_color_brewer(palette = "Set1") + 
+  scale_fill_brewer(palette = "Set1") +
+  guides(fill = guide_legend(title = "Возрастная группа и\nостаточное заболевание"),
+         color = guide_legend(title = "Возрастная группа и\nостаточное заболевание")) +
+  labs(title = "Кривая выживаемости пациентов различных\nвозрастных групп и наличия остаточного заболевания") +
+  theme(plot.title = element_text(size = 14, face = "bold", hjust = 0.5))
+```
+
+### Тип лечения и индекс ECOG
+```{r}
+ovarian$trt_ecog <- factor(apply(ovarian[, c(5:6)], 1, paste, collapse = '_'))
+km_fit6 <- survfit(Surv(futime, fustat) ~ trt_ecog, data = ovarian)
+autoplot(km_fit6) +
+  scale_color_brewer(palette = "Set1") + 
+  scale_fill_brewer(palette = "Set1") +
+  guides(fill = guide_legend(title = "Тип лечения и\nиндекс ECOG"),
+         color = guide_legend(title = "Тип лечения и\nиндекс ECOG")) +
+  labs(title = "Кривая выживаемости пациентов различных\nтипов лечения и индексов ECOG") +
+  theme(plot.title = element_text(size = 14, face = "bold", hjust = 0.5))
+```
+
+### Тип лечения и остаточное заболевание
+```{r}
+ovarian$trt_resid <- factor(apply(ovarian[, c(4, 6)], 1, paste, collapse = '_'))
+km_fit7 <- survfit(Surv(futime, fustat) ~ trt_resid, data = ovarian)
+autoplot(km_fit7) +
+  scale_color_brewer(palette = "Set1") + 
+  scale_fill_brewer(palette = "Set1") +
+  guides(fill = guide_legend(title = "Тип лечения и\nналичие остаточного заболевания"),
+         color = guide_legend(title = "Тип лечения и\nналичие остаточного заболевания")) +
+  labs(title = "Кривая выживаемости пациентов различных\nтипов лечения и наличия остаточного заболевания") +
+  theme(plot.title = element_text(size = 14, face = "bold", hjust = 0.5))
+```
+
+
+# Лок-ранк кривые
+```{r}
+survdiff(Surv(futime, fustat) ~ resid.ds, data = ovarian)
+```
+
+```{r}
+survdiff(Surv(futime, fustat) ~ rx, data = ovarian)
+```
+
+
+```{r}
+survdiff(Surv(futime, fustat) ~ ecog.ps, data = ovarian)
+```
+
+
+```{r}
+survdiff(Surv(futime, fustat) ~ age_group, data = ovarian)
+```
+
+
+```{r}
+pairwise_survdiff(Surv(futime, fustat) ~ age_trt, data = ovarian)
+```
+
+
+```{r}
+pairwise_survdiff(Surv(futime, fustat) ~ age_res, data = ovarian)
+```
+
+
+```{r}
+pairwise_survdiff(Surv(futime, fustat) ~ trt_ecog, data = ovarian)
+```
+
+
+```{r}
+pairwise_survdiff(Surv(futime, fustat) ~ trt_resid, data = ovarian)
+```
+
+Нигде нет статистически значимых различий между кривыми выживаемости
+
+# Анализ факторов, влияющих на риск (модель Кокса)
+```{r}
+cox_fit <- coxph(Surv(futime, fustat) ~ resid.ds + rx + ecog.ps + age_group, data = ovarian)
+summary(cox_fit)
+```
+
+```{r}
+autoplot(survfit(cox_fit))
+```
+
+
+```{r}
+ggforest(cox_fit, data = ovarian)
+```
+
+Ни один из факторов не влияет значимо на кривую выживаемости
